@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >-
+  Lambda Function to move objects from incoming to data
+
+Parameters:
+  SrcBucket:
+    Description: Source Bucket required for Role Policy
+    Type: String
+  DestinationBucket:
+    Description: Destination Bucket required for Role Policy
+    Type: String
+
+Resources:
+
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          from boto3 import client
+          s3_client = client('s3')
+          s3 = boto3.resource('s3')
+
+          def handler(event, context):
+            for record in event['Records']:
+              bucket_name = record['s3']['bucket']['name']
+              s3_object_key = record['s3']['object']['key']
+              if s3_object_key.startswith('incoming'):
+                print (s3_object_key)
+
+                file = s3_object_key[-3:]
+
+                if file == ".csv":
+                  pending_key =  "pending-review/" + now.strftime('%Y%m%d%H:%M:%S')+file
+                  print (pending_key)                  
+                  copy_source = {
+                    'Bucket': ${DestinationBucket},
+                    'Key'   : s3_object_key
+                  }
+                  s3.meta.client.copy(copy_source, bucket_name, pending_key)            
+
+                   # TODO implement
+                   return {
+                     'statusCode': 200,
+                     'body': json.dumps("aws_folder_file")
+                   }
+
+      Description: !Sub 'Copies objects from Incoming to correct location based on S3 Event Trigger'
+      FunctionName: !Sub '${AWS::StackName}'
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt LambdaS3EventRole.Arn
+      Runtime: python3.6
+      Timeout: 60
+
+  LambdaS3EventRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - s3.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Sub '${AWS::StackName}'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowLogging
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+              - Sid: SrcBucketPrivs
+                Action:
+                  - 's3:*'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${SrcBucket}/*'
+                  - !Sub 'arn:aws:s3:::${SrcBucket}'
+                  - !Sub 'arn:aws:s3:::${DestinationBucket}/*'
+                  - !Sub 'arn:aws:s3:::${DestinationBucket}'
+                Effect: Allow
+
+  LambdaInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Sub 'arn:aws:s3:::${SrcBucket}'
+
+  CustomLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: !Sub 'LambdaS3.lambda_handler'
+      Role: !GetAtt LambdaS3EventRole.Arn
+      Code:
+        S3Bucket: 'serverless-packages'
+        S3Key: 'LambdaS3.zip'
+      FunctionName: 'LambdaS3Event'
+      Runtime: python3.6
+      Timeout: 50
+
+  Lambdatrigger:
+    Type: 'Custom::RouteTableLambda'
+    DependsOn: LambdaInvokePermission
+    Properties:
+      ServiceToken: !GetAtt CustomLambdaFunction.Arn
+      LambdaArn: !GetAtt LambdaFunction.Arn
+      Bucket: !Ref SrcBucket
