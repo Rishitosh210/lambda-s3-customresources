@@ -17,9 +17,13 @@ def lambda_handler(event, context):
         if event['RequestType'] == 'Delete':
             print("Request Type:",event['RequestType'])
             Bucket=event['ResourceProperties']['Bucket']
+
             delete_notification(Bucket)
-            print("Sending response to custom resource after Delete")
+
+            print("Sending response to custom resource after Delete=")
+
         elif event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+
             print("Request Type:",event['RequestType'])
             LambdaArn=event['ResourceProperties']['LambdaArn']
             Bucket=event['ResourceProperties']['Bucket']
@@ -49,6 +53,28 @@ def add_notification(LambdaArn, Bucket):
         ]
       }
     )
+
+''' 
+If you want to use   notification by filter
+'LambdaFunctionConfigurations': [
+             { 
+             'LambdaFunctionArn': LambdaArn,
+                 'Events': [
+                     's3:ObjectCreated:*'
+                     ],
+                 'Filter': {
+                     'Key': {
+                         'FilterRules': [
+                             {
+                                 'Name': 'suffix',
+                                 'Value': '.csv'
+                             },
+                         ]
+                     }
+                 }
+             },
+         ]
+        '''
     print("Put request completed....")
 
 def delete_notification(Bucket):

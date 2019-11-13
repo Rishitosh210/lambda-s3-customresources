@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 
 Description: >-
-  Lambda Function to move objects from incoming to data
+  Lambda Function to move objects from s3 bucket to another
 
 Parameters:
   SrcBucket:
@@ -20,33 +20,24 @@ Resources:
         ZipFile: !Sub |
           import json
           import boto3
-          from boto3 import client
-          s3_client = client('s3')
+          from datetime import datetime
           s3 = boto3.resource('s3')
 
           def handler(event, context):
             for record in event['Records']:
               bucket_name = record['s3']['bucket']['name']
               s3_object_key = record['s3']['object']['key']
-              if s3_object_key.startswith('incoming'):
-                print (s3_object_key)
-
-                file = s3_object_key[-3:]
-
-                if file == ".csv":
-                  pending_key =  "pending-review/" + now.strftime('%Y%m%d%H:%M:%S')+file
-                  print (pending_key)                  
-                  copy_source = {
-                    'Bucket': ${DestinationBucket},
-                    'Key'   : s3_object_key
-                  }
-                  s3.meta.client.copy(copy_source, bucket_name, pending_key)            
-
-                   # TODO implement
-                   return {
-                     'statusCode': 200,
-                     'body': json.dumps("aws_folder_file")
-                   }
+              pending_key =  "pending-review" + datetime.now().strftime('%Y%m%d%H:%M:%S')+s3_object_key
+              print (pending_key)                  
+              copy_source = {
+                'Bucket': bucket_name,
+                'Key'   : s3_object_key
+              }
+              s3.meta.client.copy(copy_source, ${DestinationBucket}, pending_key)            
+            return {
+                 'statusCode': 200,
+                 'body': json.dumps("aws_folder_file")
+               }
 
       Description: !Sub 'Copies objects from Incoming to correct location based on S3 Event Trigger'
       FunctionName: !Sub '${AWS::StackName}'
@@ -99,6 +90,26 @@ Resources:
       Principal: s3.amazonaws.com
       SourceAccount: !Ref 'AWS::AccountId'
       SourceArn: !Sub 'arn:aws:s3:::${SrcBucket}'
+
+  CustomLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: !Sub 'LambdaS3.lambda_handler'
+      Role: !GetAtt LambdaS3EventRole.Arn
+      Code:
+        S3Bucket: 'serverless-packages'
+        S3Key: 'LambdaS3.zip'
+      FunctionName: 'LambdaS3Event'
+      Runtime: python3.6
+      Timeout: 50
+
+  Lambdatrigger:
+    Type: 'Custom::RouteTableLambda'
+    DependsOn: LambdaInvokePermission
+    Properties:
+      ServiceToken: !GetAtt CustomLambdaFunction.Arn
+      LambdaArn: !GetAtt LambdaFunction.Arn
+      Bucket: !Ref SrcBucket
 
   CustomLambdaFunction:
     Type: 'AWS::Lambda::Function'
